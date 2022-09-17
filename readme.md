@@ -8,4 +8,4 @@ currently, the core emulator is in place, but no functionality exists to load or
 
 ## documentation
 
-the documentation needs fancier tables than github will let me add (specifically, merged cells and colours) so the full documentation is hosted on [my website](ambylastname.xyz/magpie)
+the documentation needs fancier tables than github will let me add (specifically, merged cells and colours) so the full documentation is hosted on [my website](https://ambylastname.xyz/magpie)
