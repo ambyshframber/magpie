@@ -12,19 +12,26 @@ fn main() {
 
 struct Computer<M: Memory> {
     mem: M,
-    processor: Processor
+    processor: Processor,
+    interrupt_line: bool
 }
 impl<M: Memory> Computer<M> {
     pub fn new(mem: M) -> Computer<M> {
         Computer {
             mem,
-            processor: Processor::new()
+            processor: Processor::new(),
+            interrupt_line: false,
         }
     }
     pub fn run(&mut self) {
         self.processor.reset(&mut self.mem);
         loop {
-            self.processor.clock(&mut self.mem)
+            self.processor.clock(&mut self.mem);
+            if self.mem.clock() {
+                if !self.interrupt_line {
+                    self.processor.irq(&mut self.mem)
+                }
+            }
         }
     }
 }
@@ -32,6 +39,7 @@ impl<M: Memory> Computer<M> {
 pub trait Memory {
     fn read(&mut self, addr: u16) -> u16;
     fn write(&mut self, addr: u16, val: u16);
+    fn clock(&mut self) -> bool { false } // returned value is irq
 }
 
 #[cfg(test)]

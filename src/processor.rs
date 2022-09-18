@@ -16,32 +16,41 @@ pub struct Processor {
     carry: bool,
 
     interrupts: bool,
+    iret: u16,
+
+    fault: bool,
 
     delay_vals: [u16; 2], // intentional branch delay slots tee hee
     delay_regs: [u8; 2],
 
     delay_ctr: usize,
+
+    next_instruction: u16
 }
 impl Processor {
     pub fn new() -> Processor {
         Processor {
             registers: [0; 16],
             carry: false, zero: false, negative: false,
-            interrupts: false,
+            interrupts: false, iret: 0,
+            fault: false,
             delay_vals: [0; 2],
             delay_regs: [0; 2],
-            delay_ctr: 0
+            delay_ctr: 0,
+            next_instruction: 0
         }
     }
     pub fn reset<M: Memory>(&mut self, mem: &mut M) {
         let pc = mem.read(RESET_VEC);
-        self.registers[PC] = pc
+        self.registers[PC] = pc;
     }
 
     fn get_flags(&self) -> u16 {
         let mut ret = self.zero as u16;
         ret |= (self.negative as u16) << 1;
         ret |= (self.carry as u16) << 2;
+        ret |= (self.interrupts as u16) << 3;
+        ret |= (self.fault as u16) << 4;
 
         ret
     }
@@ -49,6 +58,8 @@ impl Processor {
         self.zero = f & 0b1 != 0;
         self.negative = f & 0b10 != 0;
         self.carry = f & 0b100 != 0;
+        self.interrupts = f & 0b1000 != 0;
+        self.fault = f & 0b1_0000 != 0;
     }
 
     fn set_delay(&mut self, reg: u8, val: u16) {
@@ -64,14 +75,12 @@ impl Processor {
         }
     }
     fn write_reg(&mut self, id: u8, val: u16) {
-        if id == PC as u8 {
-            self.set_delay(PC as u8, val) // can't bypass the delay slot using a move
-        }
-        else {
-            self.registers[(id & 0xf) as usize] = val;
-            self.zero = val == 0;
-            self.negative = (val as i16) < 0;
-        }
+        self.write_reg_no_flags(id, val);
+        self.zero = val == 0;
+        self.negative = (val as i16) < 0;
+    }
+    fn write_reg_no_flags(&mut self, id: u8, val: u16) {
+        self.registers[(id & 0xf) as usize] = val;
     }
 
     fn write_delays(&mut self) {
@@ -85,7 +94,16 @@ impl Processor {
 
     pub fn clock<M: Memory>(&mut self, mem: &mut M) {
         self.write_delays();
-        let instr = mem.read(self.registers[PC]);
+        let next_instr = mem.read(self.registers[PC]); // branch delay slot implemented by holding an instruction back
+        let instr = self.next_instruction;
+        self.next_instruction = next_instr;
+
+        #[cfg(test)]
+        {
+            println!("this instruction: {:04x}", instr);
+            println!("next instruction: {:04x}", next_instr);
+            println!("program counter: {:04x}", self.registers[PC]);
+        }
 
         if instr & 0b1000 == 0 { // short opcode
             self.short_op(mem, instr)
@@ -94,15 +112,41 @@ impl Processor {
             let r1 = ((instr & 0xf000) >> 12) as u8;
             let r2 = ((instr & 0x0f00) >> 8) as u8;
 
-            match instr & 0x8f {
-                0x8 => self.jump(instr, r1, r2),
-                0x88 => self.movement(instr, r1, r2, mem),
-                0x9 | 0x89 => self.arithmetic(instr, r1, r2),
+            match instr & 0xf {
+                0x8 => {
+                    match instr & 0x80 {
+                        0 => self.jump(instr, r1, r2),
+                        _ => self.movement(instr, r1, r2, mem)
+                    }
+                }
+                0x9 => self.arithmetic(instr, r1, r2),
+                0xa => self.misc(instr, r1, r2, mem),
                 _ => {}
             }
         }
 
         self.registers[PC] += 2
+    }
+
+    fn misc<M: Memory>(&mut self, instr: u16, _r1: u8, r2: u8, mem: &mut M) { // interrupts etc
+        match (instr & 0b1_0000) >> 4 {
+            0 => self.nmi(mem),
+            _ => self.write_reg(r2, self.iret)
+        }
+    }
+
+    fn nmi<M: Memory>(&mut self, mem: &mut M) {
+        self.iret = self.registers[PC];
+        let new_addr = mem.read(NMI_VEC);
+        self.registers[PC] = new_addr;
+        self.interrupts = false;
+    }
+    pub fn irq<M: Memory>(&mut self, mem: &mut M) {
+        if self.interrupts {
+            self.iret = self.registers[PC];
+            let new_addr = mem.read(IRQ_VEC);
+            self.registers[PC] = new_addr;
+        }
     }
 
     fn jump(&mut self, instr: u16, ra: u8, rl: u8) {
@@ -154,19 +198,19 @@ impl Processor {
             0 => { // push
                 let ptr = self.read_reg(rs);
                 mem.write(ptr, self.read_reg(rd));
-                self.write_reg(rs, ptr.wrapping_add(2))
+                self.write_reg_no_flags(rs, ptr.wrapping_add(2))
             }
-            1 => {
+            1 => { // pop
                 let ptr = self.read_reg(rs).wrapping_sub(2);
                 let val = mem.read(ptr);
                 self.set_delay(rd, val);
-                self.write_reg(rs, ptr);
+                self.write_reg_no_flags(rs, ptr);
             }
-            2 => {
+            2 => { // mov
                 let val = self.read_reg(rs);
                 self.write_reg(rd, val)
             }
-            3 => {
+            3 => { // msx
                 let val = self.read_reg(rs) as i8 as i16 as u16; // EXTEND
                 self.write_reg(rd, val)
             }
