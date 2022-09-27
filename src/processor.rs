@@ -8,6 +8,21 @@ const IRQ_VEC: u16 = 0xfffa; // fa and fb
 const NMI_VEC: u16 = 0xfffc; // fc and fd
 const RESET_VEC: u16 = 0xfffe; // fe and ff
 
+#[derive(Copy, Clone, PartialEq)]
+enum ShouldWriteFlags {
+    No, No2, No3, Yes
+}
+impl ShouldWriteFlags {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::No => Self::No2,
+            Self::No2 => Self::No3,
+            Self::No3 => Self::Yes,
+            Self::Yes => Self::Yes
+        }
+    }
+}
+
 pub struct Processor {
     registers: [u16; 16],
 
@@ -25,7 +40,8 @@ pub struct Processor {
 
     delay_ctr: usize,
 
-    next_instruction: u16
+    next_instruction: u16,
+    should_write_flags: ShouldWriteFlags
 }
 impl Processor {
     pub fn new() -> Processor {
@@ -37,7 +53,8 @@ impl Processor {
             delay_vals: [0; 2],
             delay_regs: [0; 2],
             delay_ctr: 0,
-            next_instruction: 0
+            next_instruction: 0,
+            should_write_flags: ShouldWriteFlags::Yes
         }
     }
     pub fn reset<M: Memory>(&mut self, mem: &mut M) {
@@ -60,6 +77,7 @@ impl Processor {
         self.carry = f & 0b100 != 0;
         self.interrupts = f & 0b1000 != 0;
         self.fault = f & 0b1_0000 != 0;
+        self.should_write_flags = ShouldWriteFlags::No;
     }
 
     fn set_delay(&mut self, reg: u8, val: u16) {
@@ -76,8 +94,10 @@ impl Processor {
     }
     fn write_reg(&mut self, id: u8, val: u16) {
         self.write_reg_no_flags(id, val);
-        self.zero = val == 0;
-        self.negative = (val as i16) < 0;
+        if self.should_write_flags == ShouldWriteFlags::Yes {
+            self.zero = val == 0;
+            self.negative = (val as i16) < 0;
+        }
     }
     fn write_reg_no_flags(&mut self, id: u8, val: u16) {
         self.registers[(id & 0xf) as usize] = val;
@@ -105,6 +125,8 @@ impl Processor {
             println!("program counter: {:04x}", self.registers[PC]);
         }
 
+        self.should_write_flags = self.should_write_flags.cycle();
+
         if instr & 0b1000 == 0 { // short opcode
             self.short_op(mem, instr)
         }
@@ -125,7 +147,7 @@ impl Processor {
             }
         }
 
-        self.registers[PC] += 2
+        self.registers[PC] = self.registers[PC].wrapping_add(2)
     }
 
     fn misc<M: Memory>(&mut self, instr: u16, _r1: u8, r2: u8, mem: &mut M) { // interrupts etc
@@ -142,10 +164,11 @@ impl Processor {
         self.interrupts = false;
     }
     pub fn irq<M: Memory>(&mut self, mem: &mut M) {
-        if self.interrupts {
+        if self.interrupts && self.should_write_flags == ShouldWriteFlags::Yes {
             self.iret = self.registers[PC];
             let new_addr = mem.read(IRQ_VEC);
             self.registers[PC] = new_addr;
+            self.interrupts = false;
         }
     }
 
@@ -161,7 +184,7 @@ impl Processor {
             self.write_reg(rl, link);
 
             let address = self.read_reg(ra);
-            self.set_delay(PC as u8, address);
+            self.registers[PC] = address
         }
     }
     fn arithmetic(&mut self, instr: u16, rs: u8, rd: u8) {
@@ -178,12 +201,12 @@ impl Processor {
             0x5 => !dest,
             0x6 => src | dest,
             0x7 => src ^ dest,
-            0x8 => src.overflowing_shl(dest as u32).0,
-            0x9 => src.overflowing_shr(dest as u32).0,
-            0xa => (src as i16).overflowing_shl(dest as u32).0 as u16,
-            0xb => (src as i16).overflowing_shr(dest as u32).0 as u16,
-            0xc => src.wrapping_shl(dest as u32),
-            0xd => src.wrapping_shr(dest as u32),
+            0x8 => dest.overflowing_shl(src as u32).0,
+            0x9 => dest.overflowing_shr(src as u32).0,
+            0xa => (dest as i16).overflowing_shl(src as u32).0 as u16,
+            0xb => (dest as i16).overflowing_shr(src as u32).0 as u16,
+            0xc => dest.wrapping_shl(src as u32),
+            0xd => dest.wrapping_shr(src as u32),
             0xe => self.get_flags(),
             0xf => {
                 self.set_flags(src);
@@ -198,10 +221,10 @@ impl Processor {
             0 => { // push
                 let ptr = self.read_reg(rs);
                 mem.write(ptr, self.read_reg(rd));
-                self.write_reg_no_flags(rs, ptr.wrapping_add(2))
+                self.write_reg_no_flags(rs, ptr.wrapping_sub(2)) // stacks grow down
             }
             1 => { // pop
-                let ptr = self.read_reg(rs).wrapping_sub(2);
+                let ptr = self.read_reg(rs).wrapping_add(2);
                 let val = mem.read(ptr);
                 self.set_delay(rd, val);
                 self.write_reg_no_flags(rs, ptr);
@@ -251,10 +274,10 @@ impl Processor {
                 let offset_corrected = offset_ek - 2i16.pow(12); // excess k, where k is 2**13
                 let new_pc = self.registers[PC].wrapping_add_signed(offset_corrected);
                 if instr & 1 != 0 { // link
-                    self.registers[LINK_REG] = self.registers[PC] + 4;
+                    self.registers[LINK_REG] = self.registers[PC] + 2;
                 }
 
-                self.set_delay(PC as u8, new_pc)
+                self.registers[PC] = new_pc
             }
             _ => { // imm-reg
                 let mut val = (instr & 0xff00) >> 8;

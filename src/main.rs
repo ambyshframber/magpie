@@ -13,14 +13,12 @@ fn main() {
 struct Computer<M: Memory> {
     mem: M,
     processor: Processor,
-    interrupt_line: bool
 }
 impl<M: Memory> Computer<M> {
     pub fn new(mem: M) -> Computer<M> {
         Computer {
             mem,
             processor: Processor::new(),
-            interrupt_line: false,
         }
     }
     pub fn run(&mut self) {
@@ -28,9 +26,7 @@ impl<M: Memory> Computer<M> {
         loop {
             self.processor.clock(&mut self.mem);
             if self.mem.clock() {
-                if !self.interrupt_line {
-                    self.processor.irq(&mut self.mem)
-                }
+                self.processor.irq(&mut self.mem)
             }
         }
     }
