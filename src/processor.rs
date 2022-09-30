@@ -58,7 +58,7 @@ impl Processor {
         }
     }
     pub fn reset<M: Memory>(&mut self, mem: &mut M) {
-        let pc = mem.read(RESET_VEC);
+        let pc = u16::from_le_bytes(mem.read(RESET_VEC));
         self.registers[PC] = pc;
     }
 
@@ -114,15 +114,15 @@ impl Processor {
 
     pub fn clock<M: Memory>(&mut self, mem: &mut M) {
         self.write_delays();
-        let next_instr = mem.read(self.registers[PC]); // branch delay slot implemented by holding an instruction back
+        let next_instr = u16::from_be_bytes(mem.read(self.registers[PC])); // branch delay slot implemented by holding an instruction back
         let instr = self.next_instruction;
         self.next_instruction = next_instr;
 
         #[cfg(test)]
         {
-            println!("this instruction: {:04x}", instr);
-            println!("next instruction: {:04x}", next_instr);
-            println!("program counter: {:04x}", self.registers[PC]);
+            println!("this instruction: {:04x}\r", instr);
+            println!("next instruction: {:04x}\r", next_instr);
+            println!("program counter: {:04x}\r", self.registers[PC]);
         }
 
         self.should_write_flags = self.should_write_flags.cycle();
@@ -159,14 +159,14 @@ impl Processor {
 
     fn nmi<M: Memory>(&mut self, mem: &mut M) {
         self.iret = self.registers[PC];
-        let new_addr = mem.read(NMI_VEC);
+        let new_addr = u16::from_le_bytes(mem.read(NMI_VEC));
         self.registers[PC] = new_addr;
         self.interrupts = false;
     }
     pub fn irq<M: Memory>(&mut self, mem: &mut M) {
         if self.interrupts && self.should_write_flags == ShouldWriteFlags::Yes {
             self.iret = self.registers[PC];
-            let new_addr = mem.read(IRQ_VEC);
+            let new_addr = u16::from_le_bytes(mem.read(IRQ_VEC));
             self.registers[PC] = new_addr;
             self.interrupts = false;
         }
@@ -180,11 +180,11 @@ impl Processor {
             3 => self.negative,
             _ => false
         } {
-            let link = self.registers[PC] + 4;
+            let link = self.registers[PC] + 2;
             self.write_reg(rl, link);
 
             let address = self.read_reg(ra);
-            self.registers[PC] = address
+            self.registers[PC] = address.wrapping_sub(2)
         }
     }
     fn arithmetic(&mut self, instr: u16, rs: u8, rd: u8) {
@@ -220,12 +220,12 @@ impl Processor {
         match (instr & 0b0011_0000) >> 4 {
             0 => { // push
                 let ptr = self.read_reg(rs);
-                mem.write(ptr, self.read_reg(rd));
+                mem.write(ptr, self.read_reg(rd).to_le_bytes());
                 self.write_reg_no_flags(rs, ptr.wrapping_sub(2)) // stacks grow down
             }
             1 => { // pop
                 let ptr = self.read_reg(rs).wrapping_add(2);
-                let val = mem.read(ptr);
+                let val = u16::from_le_bytes(mem.read(ptr));
                 self.set_delay(rd, val);
                 self.write_reg_no_flags(rs, ptr);
             }
@@ -262,11 +262,11 @@ impl Processor {
                 let offset = self.read_reg(ro);
 
                 if instr & 1 == 0 {
-                    let val = mem.read(addr.wrapping_add(offset));
+                    let val = u16::from_le_bytes(mem.read(addr.wrapping_add(offset)));
                     self.set_delay(rd, val)
                 }
                 else {
-                    mem.write(addr, self.read_reg(rd))
+                    mem.write(addr, self.read_reg(rd).to_le_bytes())
                 }
             }
             0b110 => { // rjmp/rjal
@@ -277,7 +277,7 @@ impl Processor {
                     self.registers[LINK_REG] = self.registers[PC] + 2;
                 }
 
-                self.registers[PC] = new_pc
+                self.registers[PC] = new_pc.wrapping_sub(2)
             }
             _ => { // imm-reg
                 let mut val = (instr & 0xff00) >> 8;
