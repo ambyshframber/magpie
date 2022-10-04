@@ -8,6 +8,7 @@ use std::time::{Instant, Duration};
 
 mod mem_map;
 mod processor;
+#[cfg(test)]
 mod debug_mem;
 
 fn main() {
@@ -28,7 +29,7 @@ impl<M: Memory> Computer<M> {
         Computer {
             mem,
             processor: Processor::new(),
-            clock: Clock::new(1000f64) // 1mhz
+            clock: Clock::new(1000f64)
         }
     }
     pub fn run(&mut self) {
@@ -38,12 +39,13 @@ impl<M: Memory> Computer<M> {
         loop {
             self.processor.clock(&mut self.mem);
             if self.mem.clock() {
+                //eprintln!("irq on board");
                 self.processor.irq(&mut self.mem)
             }
             if self.mem.should_exit() {
                 break
             }
-            //self.clock.wait();
+            self.clock.wait();
             //let iter_time = Instant::now().duration_since(now);
             //eprintln!("{:?}\r", iter_time);
             //now = Instant::now();
@@ -53,7 +55,9 @@ impl<M: Memory> Computer<M> {
 
 pub trait Memory {
     fn read(&mut self, addr: u16) -> [u8; 2];
+    fn read_8(&mut self, addr: u16) -> u8;
     fn write(&mut self, addr: u16, val: [u8; 2]);
+    fn write_8(&mut self, addr: u16, val: u8);
     fn clock(&mut self) -> bool { false } // returned value is irq
     fn should_exit(&self) -> bool { false }
 }
@@ -74,7 +78,7 @@ impl Clock {
         let now = Instant::now();
         let next = self.prev + self.period;
         let wait_dur = next.checked_duration_since(now).unwrap_or_else(|| {
-            eprintln!("clock saturated!\r");
+            //eprintln!("clock saturated!\r");
             Duration::ZERO
         });
         sleep(wait_dur);

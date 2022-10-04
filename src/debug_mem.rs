@@ -23,4 +23,10 @@ impl Memory for MemShell {
         let mut buf = String::new();
         stdin().read_line(&mut buf).unwrap();
     }
+    fn read_8(&mut self, addr: u16) -> u8 {
+        unimplemented!()
+    }
+    fn write_8(&mut self, addr: u16, val: u8) {
+        unimplemented!()
+    }
 }
