@@ -11,6 +11,11 @@ mod processor;
 #[cfg(test)]
 mod debug_mem;
 
+#[cfg(debug_assertions)]
+const CLOCK_FREQ: f64 = 10f64;
+#[cfg(not(debug_assertions))]
+const CLOCK_FREQ: f64 = 1000f64;
+
 fn main() {
     let rom_name = args().skip(1).next().unwrap();
     let rom = std::fs::read(rom_name).unwrap();
@@ -29,7 +34,7 @@ impl<M: Memory> Computer<M> {
         Computer {
             mem,
             processor: Processor::new(),
-            clock: Clock::new(1000f64)
+            clock: Clock::new(CLOCK_FREQ)
         }
     }
     pub fn run(&mut self) {

@@ -88,6 +88,7 @@ impl Memory for MemoryMap {
         }
     }
     fn write_8(&mut self, addr: u16, val: u8) {
+        //eprintln!("write {:02x} to {:04x}\r", val, addr);
         let addr = addr as usize;
         if addr < MAIN_MEM_SIZE {
             self.main_mem[addr] = val;
@@ -100,6 +101,7 @@ impl Memory for MemoryMap {
         }
     }
     fn clock(&mut self) -> bool {
+        //eprintln!("clock");
         self.serial.clock()
     }
     fn should_exit(&self) -> bool {
@@ -160,7 +162,7 @@ impl Serial {
         if self.buf.is_empty() {
             self.cycles_since_first_byte = 0
         }
-        //eprintln!("serial read {:02x}\r", v);
+        //seprintln!("serial read {:02x}\r", v);
         v.to_le_bytes()
     }
     fn write(&mut self, b: [u8; 2]) {

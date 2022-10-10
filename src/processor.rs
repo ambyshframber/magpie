@@ -14,7 +14,7 @@ enum ShouldWriteFlags {
 impl ShouldWriteFlags {
     pub fn cycle(self) -> Self {
         match self {
-            Self::No => Self::No2,
+            Self::No => Self::No3,
             Self::No2 => Self::No3,
             Self::No3 => Self::Yes,
             Self::Yes => Self::Yes
@@ -91,7 +91,13 @@ impl Processor {
     pub fn clock<M: Memory>(&mut self, mem: &mut M) {
         let instr = u16::from_be_bytes(mem.read(self.registers[PC]));
 
-        //eprintln!("pc: {:04x}; cur: {:04x}; r1: {:04x}", self.registers[PC], instr, self.registers[1]);
+        #[cfg(debug_assertions)] {
+            eprintln!("pc: {:04x}; cur: {:04x}", self.registers[PC], instr);
+            for v in self.registers {
+                eprint!("{:04x} ", v)
+            }
+            eprintln!();
+        }
 
         self.should_write_flags = self.should_write_flags.cycle();
 
@@ -158,7 +164,9 @@ impl Processor {
     pub fn irq<M: Memory>(&mut self, mem: &mut M) {
         //eprintln!("{}", self.interrupts);
         if self.interrupts && self.should_write_flags == ShouldWriteFlags::Yes {
-            //eprintln!("irq!");
+            #[cfg(debug_assertions)] {
+                eprintln!("irq!");
+            }
             self.iret = self.registers[PC].wrapping_sub(2);
             let new_addr = u16::from_le_bytes(mem.read(IRQ_VEC));
             self.registers[PC] = new_addr;
